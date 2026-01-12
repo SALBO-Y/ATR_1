@@ -41,13 +41,14 @@ import kis_auth as ka
 
 # 텔레그램 봇 관련 import (필요시 설치: pip install python-telegram-bot)
 try:
-    from telegram import Bot
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
     from telegram.error import TelegramError
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
     print("Warning: python-telegram-bot not installed. Telegram features will be disabled.")
-    print("Install with: pip install python-telegram-bot")
+    print("Install with: pip install python-telegram-bot>=20.0")
 
 # ====================================================================================================
 # 로깅 설정
@@ -544,56 +545,464 @@ class OrderManager:
 
 
 # ====================================================================================================
-# STEP 5: 텔레그램 봇 연동
+# STEP 5: 텔레그램 봇 연동 (버튼 클릭형 양방향 통신)
 # ====================================================================================================
 
 class TelegramNotifier:
-    """텔레그램 알림 클래스"""
+    """텔레그램 알림 클래스 (버튼 클릭형 인터페이스)"""
 
-    def __init__(self, bot_token: str, chat_id: str):
+    def __init__(self, bot_token: str, chat_id: str, trading_system=None):
         self.bot_token = bot_token
         self.chat_id = chat_id
-        self.bot = None
+        self.trading_system = trading_system
+        self.application = None
+        self.bot_thread = None
+
+        # 알림 설정 상태
+        self.execution_notice_enabled = True  # 체결알림 ON/OFF
 
         if TELEGRAM_AVAILABLE and bot_token and chat_id:
             try:
-                self.bot = Bot(token=bot_token)
+                # Application 생성
+                self.application = Application.builder().token(bot_token).build()
+
+                # 핸들러 등록
+                self._register_handlers()
+
                 logger.info("텔레그램 봇 초기화 완료")
             except Exception as e:
                 logger.error(f"텔레그램 봇 초기화 실패: {e}")
 
-    def send_message(self, message: str):
-        """텔레그램 메시지 전송"""
-        if not self.bot or not TradingConfig.TELEGRAM_ENABLED:
+    def _register_handlers(self):
+        """핸들러 등록"""
+        if not self.application:
+            return
+
+        # 명령어 핸들러
+        self.application.add_handler(CommandHandler("start", self._cmd_start))
+        self.application.add_handler(CommandHandler("menu", self._cmd_menu))
+        self.application.add_handler(CommandHandler("help", self._cmd_help))
+
+        # 버튼 콜백 핸들러
+        self.application.add_handler(CallbackQueryHandler(self._button_callback))
+
+    async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """봇 시작 명령어"""
+        welcome_text = (
+            "🤖 한국투자증권 자동트레이딩 시스템\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "환영합니다! 아래 메뉴를 선택하세요.\n\n"
+            f"현재 모드: {TradingConfig.ENV_MODE.upper()}\n"
+            f"체결알림: {'ON ✅' if self.execution_notice_enabled else 'OFF ❌'}"
+        )
+
+        keyboard = self._get_main_menu_keyboard()
+
+        await update.message.reply_text(
+            welcome_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _cmd_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """메뉴 표시 명령어"""
+        menu_text = (
+            "📱 메인 메뉴\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "원하는 기능을 선택하세요."
+        )
+
+        keyboard = self._get_main_menu_keyboard()
+
+        await update.message.reply_text(
+            menu_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """도움말 명령어"""
+        help_text = (
+            "📖 사용 가이드\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔹 /start - 봇 시작 및 메인 메뉴\n"
+            "🔹 /menu - 메인 메뉴 표시\n"
+            "🔹 /help - 도움말 표시\n\n"
+            "📌 메뉴 설명:\n"
+            "• 봇 시작/종료 - 자동매매 시스템 제어\n"
+            "• 실시간 잔고 - 현재 보유 종목 및 잔고 조회\n"
+            "• 미실현손익 - 실시간 평가손익 조회\n"
+            "• 체결알림 설정 - 체결 알림 ON/OFF\n"
+            "• 시스템 상태 - 현재 시스템 운영 상태\n\n"
+            "💡 Tip: 버튼을 클릭하여 쉽게 조회 가능합니다!"
+        )
+
+        await update.message.reply_text(help_text)
+
+    def _get_main_menu_keyboard(self):
+        """메인 메뉴 키보드 생성"""
+        trading_status = "실행중 🟢" if (self.trading_system and self.trading_system.is_running) else "정지 🔴"
+        notice_status = "ON ✅" if self.execution_notice_enabled else "OFF ❌"
+
+        keyboard = [
+            [
+                InlineKeyboardButton(f"🤖 봇 시작/종료 ({trading_status})", callback_data="toggle_bot"),
+            ],
+            [
+                InlineKeyboardButton("💰 실시간 잔고", callback_data="balance"),
+                InlineKeyboardButton("📊 미실현손익", callback_data="unrealized_pl"),
+            ],
+            [
+                InlineKeyboardButton(f"🔔 체결알림 ({notice_status})", callback_data="toggle_notice"),
+                InlineKeyboardButton("📈 시스템 상태", callback_data="system_status"),
+            ],
+            [
+                InlineKeyboardButton("🔄 새로고침", callback_data="refresh"),
+                InlineKeyboardButton("❓ 도움말", callback_data="help"),
+            ]
+        ]
+
+        return keyboard
+
+    async def _button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """버튼 클릭 콜백 처리"""
+        query = update.callback_query
+        await query.answer()
+
+        callback_data = query.data
+
+        try:
+            if callback_data == "toggle_bot":
+                await self._handle_toggle_bot(query)
+            elif callback_data == "balance":
+                await self._handle_balance(query)
+            elif callback_data == "unrealized_pl":
+                await self._handle_unrealized_pl(query)
+            elif callback_data == "toggle_notice":
+                await self._handle_toggle_notice(query)
+            elif callback_data == "system_status":
+                await self._handle_system_status(query)
+            elif callback_data == "refresh":
+                await self._handle_refresh(query)
+            elif callback_data == "help":
+                await self._handle_help(query)
+        except Exception as e:
+            logger.error(f"버튼 콜백 처리 오류: {e}")
+            await query.edit_message_text(f"⚠️ 오류 발생: {str(e)}")
+
+    async def _handle_toggle_bot(self, query):
+        """봇 시작/종료 처리"""
+        if not self.trading_system:
+            await query.edit_message_text("⚠️ 트레이딩 시스템이 연결되지 않았습니다.")
+            return
+
+        if self.trading_system.is_running:
+            # 봇 종료
+            self.trading_system.stop()
+            message = "🛑 자동매매 시스템을 종료합니다."
+        else:
+            # 봇 시작 (별도 스레드에서 실행 중이므로 상태만 변경)
+            message = "⚠️ 시스템은 메인 프로그램에서 시작됩니다.\n현재 상태를 확인하세요."
+
+        keyboard = self._get_main_menu_keyboard()
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _handle_balance(self, query):
+        """실시간 잔고 조회 처리"""
+        if not self.trading_system:
+            await query.edit_message_text("⚠️ 트레이딩 시스템이 연결되지 않았습니다.")
             return
 
         try:
-            asyncio.run(self._async_send_message(message))
-        except Exception as e:
-            logger.error(f"텔레그램 메시지 전송 실패: {e}")
+            df1, df2 = self.trading_system.balance_manager.get_balance()
 
-    async def _async_send_message(self, message: str):
-        """비동기 메시지 전송"""
+            if df1.empty:
+                message = "📭 보유 종목이 없습니다."
+            else:
+                message = "💰 [실시간 잔고]\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+                # 보유 종목 상세
+                for _, row in df1.iterrows():
+                    qty = int(row.get('hldg_qty', 0))
+                    if qty > 0:
+                        name = row.get('prdt_name', '')
+                        code = row.get('pdno', '')
+                        avg_price = float(row.get('pchs_avg_pric', 0))
+                        current_price = float(row.get('prpr', 0))
+                        eval_amt = float(row.get('evlu_amt', 0))
+                        profit = float(row.get('evlu_pfls_amt', 0))
+                        profit_rate = float(row.get('evlu_pfls_rt', 0))
+
+                        emoji = "🟢" if profit >= 0 else "🔴"
+
+                        message += (
+                            f"{emoji} {name} ({code})\n"
+                            f"  보유: {qty}주 | 평균: {avg_price:,.0f}원\n"
+                            f"  현재: {current_price:,.0f}원 | 평가: {eval_amt:,.0f}원\n"
+                            f"  손익: {profit:,.0f}원 ({profit_rate:+.2f}%)\n\n"
+                        )
+
+                # 계좌 요약
+                if not df2.empty:
+                    total_eval = float(df2.iloc[0].get('tot_evlu_amt', 0))
+                    total_profit = float(df2.iloc[0].get('evlu_pfls_smtl_amt', 0))
+
+                    message += (
+                        "━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"💵 총 평가금액: {total_eval:,.0f}원\n"
+                        f"📈 총 평가손익: {total_profit:,.0f}원\n"
+                    )
+
+            keyboard = [[InlineKeyboardButton("🔙 메인 메뉴", callback_data="refresh")]]
+            await query.edit_message_text(
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+        except Exception as e:
+            logger.error(f"잔고 조회 오류: {e}")
+            await query.edit_message_text(f"⚠️ 잔고 조회 실패: {str(e)}")
+
+    async def _handle_unrealized_pl(self, query):
+        """미실현손익 조회 처리"""
+        if not self.trading_system:
+            await query.edit_message_text("⚠️ 트레이딩 시스템이 연결되지 않았습니다.")
+            return
+
         try:
-            await self.bot.send_message(chat_id=self.chat_id, text=message)
-            logger.debug("텔레그램 메시지 전송 완료")
-        except TelegramError as e:
-            logger.error(f"텔레그램 API 오류: {e}")
+            df1, df2 = self.trading_system.balance_manager.get_balance()
+
+            if df1.empty:
+                message = "📭 보유 종목이 없습니다."
+            else:
+                message = "📊 [실시간 미실현손익]\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+                total_buy_amt = 0
+                total_eval_amt = 0
+
+                # 종목별 손익
+                for _, row in df1.iterrows():
+                    qty = int(row.get('hldg_qty', 0))
+                    if qty > 0:
+                        name = row.get('prdt_name', '')
+                        code = row.get('pdno', '')
+                        avg_price = float(row.get('pchs_avg_pric', 0))
+                        current_price = float(row.get('prpr', 0))
+                        profit = float(row.get('evlu_pfls_amt', 0))
+                        profit_rate = float(row.get('evlu_pfls_rt', 0))
+
+                        buy_amt = avg_price * qty
+                        eval_amt = current_price * qty
+
+                        total_buy_amt += buy_amt
+                        total_eval_amt += eval_amt
+
+                        emoji = "🟢" if profit >= 0 else "🔴"
+
+                        message += (
+                            f"{emoji} {name}\n"
+                            f"  매입금액: {buy_amt:,.0f}원\n"
+                            f"  평가금액: {eval_amt:,.0f}원\n"
+                            f"  손익: {profit:,.0f}원 ({profit_rate:+.2f}%)\n\n"
+                        )
+
+                # 전체 손익
+                total_profit = total_eval_amt - total_buy_amt
+                total_profit_rate = (total_profit / total_buy_amt * 100) if total_buy_amt > 0 else 0
+
+                emoji = "🟢" if total_profit >= 0 else "🔴"
+
+                message += (
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"{emoji} 전체 손익\n"
+                    f"  총 매입금액: {total_buy_amt:,.0f}원\n"
+                    f"  총 평가금액: {total_eval_amt:,.0f}원\n"
+                    f"  총 손익: {total_profit:,.0f}원\n"
+                    f"  수익률: {total_profit_rate:+.2f}%\n"
+                )
+
+            keyboard = [[InlineKeyboardButton("🔙 메인 메뉴", callback_data="refresh")]]
+            await query.edit_message_text(
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+        except Exception as e:
+            logger.error(f"미실현손익 조회 오류: {e}")
+            await query.edit_message_text(f"⚠️ 미실현손익 조회 실패: {str(e)}")
+
+    async def _handle_toggle_notice(self, query):
+        """체결알림 ON/OFF 처리"""
+        self.execution_notice_enabled = not self.execution_notice_enabled
+
+        status = "ON ✅" if self.execution_notice_enabled else "OFF ❌"
+        message = f"🔔 체결알림이 {status} 되었습니다."
+
+        keyboard = self._get_main_menu_keyboard()
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _handle_system_status(self, query):
+        """시스템 상태 조회 처리"""
+        if not self.trading_system:
+            await query.edit_message_text("⚠️ 트레이딩 시스템이 연결되지 않았습니다.")
+            return
+
+        status = "실행중 🟢" if self.trading_system.is_running else "정지 🔴"
+        notice_status = "ON ✅" if self.execution_notice_enabled else "OFF ❌"
+
+        message = (
+            "📈 [시스템 상태]\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🤖 자동매매: {status}\n"
+            f"🔔 체결알림: {notice_status}\n"
+            f"🌐 환경: {TradingConfig.ENV_MODE.upper()}\n"
+            f"📊 최대 보유 종목: {TradingConfig.MAX_STOCKS}개\n"
+            f"💰 종목당 매수금액: {TradingConfig.BUY_AMOUNT:,}원\n"
+            f"🎯 목표수익률: {TradingConfig.TARGET_PROFIT_RATE}%\n"
+            f"🛡️ 손절률: {TradingConfig.STOP_LOSS_RATE}%\n\n"
+            f"현재시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        )
+
+        keyboard = [[InlineKeyboardButton("🔙 메인 메뉴", callback_data="refresh")]]
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _handle_refresh(self, query):
+        """새로고침 처리"""
+        menu_text = (
+            "📱 메인 메뉴\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "원하는 기능을 선택하세요.\n\n"
+            f"현재시간: {datetime.now().strftime('%H:%M:%S')}"
+        )
+
+        keyboard = self._get_main_menu_keyboard()
+        await query.edit_message_text(
+            menu_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def _handle_help(self, query):
+        """도움말 처리"""
+        help_text = (
+            "📖 사용 가이드\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔹 /start - 봇 시작 및 메인 메뉴\n"
+            "🔹 /menu - 메인 메뉴 표시\n"
+            "🔹 /help - 도움말 표시\n\n"
+            "📌 메뉴 설명:\n"
+            "• 봇 시작/종료 - 자동매매 시스템 제어\n"
+            "• 실시간 잔고 - 현재 보유 종목 및 잔고 조회\n"
+            "• 미실현손익 - 실시간 평가손익 조회\n"
+            "• 체결알림 설정 - 체결 알림 ON/OFF\n"
+            "• 시스템 상태 - 현재 시스템 운영 상태\n\n"
+            "💡 Tip: 버튼을 클릭하여 쉽게 조회 가능합니다!"
+        )
+
+        keyboard = [[InlineKeyboardButton("🔙 메인 메뉴", callback_data="refresh")]]
+        await query.edit_message_text(
+            help_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    def start_bot(self):
+        """텔레그램 봇 시작 (별도 스레드)"""
+        if not self.application or not TradingConfig.TELEGRAM_ENABLED:
+            return
+
+        def run_bot():
+            try:
+                logger.info("텔레그램 봇 시작")
+                self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+            except Exception as e:
+                logger.error(f"텔레그램 봇 실행 오류: {e}")
+
+        self.bot_thread = threading.Thread(target=run_bot, daemon=True)
+        self.bot_thread.start()
+
+    def stop_bot(self):
+        """텔레그램 봇 중지"""
+        if self.application:
+            try:
+                self.application.stop()
+                logger.info("텔레그램 봇 종료")
+            except Exception as e:
+                logger.error(f"텔레그램 봇 종료 오류: {e}")
+
+    async def send_message_async(self, message: str):
+        """비동기 메시지 전송"""
+        if not self.application or not TradingConfig.TELEGRAM_ENABLED:
+            return
+
+        try:
+            await self.application.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"메시지 전송 실패: {e}")
+
+    def send_message(self, message: str):
+        """동기 메시지 전송 (기존 코드 호환용)"""
+        if not self.application or not TradingConfig.TELEGRAM_ENABLED:
+            return
+
+        try:
+            # 이벤트 루프에서 실행
+            asyncio.run(self.send_message_async(message))
+        except Exception as e:
+            logger.error(f"메시지 전송 실패: {e}")
 
     def notify_buy(self, stock_code: str, stock_name: str, qty: int, price: float):
         """매수 체결 알림"""
-        message = f"🔵 [매수 체결]\n종목: {stock_name}({stock_code})\n수량: {qty}주\n가격: {price:,.0f}원"
+        if not self.execution_notice_enabled:
+            return
+
+        message = (
+            f"🔵 <b>[매수 체결]</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"종목: {stock_name} ({stock_code})\n"
+            f"수량: {qty}주\n"
+            f"가격: {price:,.0f}원\n"
+            f"시간: {datetime.now().strftime('%H:%M:%S')}"
+        )
         self.send_message(message)
 
     def notify_sell(self, stock_code: str, stock_name: str, qty: int, price: float, profit_rate: float):
         """매도 체결 알림"""
+        if not self.execution_notice_enabled:
+            return
+
         emoji = "🔴" if profit_rate < 0 else "🟢"
-        message = f"{emoji} [매도 체결]\n종목: {stock_name}({stock_code})\n수량: {qty}주\n가격: {price:,.0f}원\n수익률: {profit_rate:.2f}%"
+        message = (
+            f"{emoji} <b>[매도 체결]</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"종목: {stock_name} ({stock_code})\n"
+            f"수량: {qty}주\n"
+            f"가격: {price:,.0f}원\n"
+            f"수익률: {profit_rate:+.2f}%\n"
+            f"시간: {datetime.now().strftime('%H:%M:%S')}"
+        )
         self.send_message(message)
 
     def notify_balance(self, total_eval: float, total_profit: float, profit_rate: float):
         """잔고 현황 알림"""
-        message = f"💰 [잔고 현황]\n평가금액: {total_eval:,.0f}원\n평가손익: {total_profit:,.0f}원\n수익률: {profit_rate:.2f}%"
+        emoji = "🟢" if total_profit >= 0 else "🔴"
+        message = (
+            f"{emoji} <b>[잔고 현황]</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"평가금액: {total_eval:,.0f}원\n"
+            f"평가손익: {total_profit:,.0f}원\n"
+            f"수익률: {profit_rate:+.2f}%\n"
+            f"시간: {datetime.now().strftime('%H:%M:%S')}"
+        )
         self.send_message(message)
 
 
@@ -753,7 +1162,8 @@ class AutoTradingSystem:
         self.balance_manager = BalanceManager(env_mode=TradingConfig.ENV_MODE)
         self.telegram = TelegramNotifier(
             bot_token=TradingConfig.TELEGRAM_BOT_TOKEN,
-            chat_id=TradingConfig.TELEGRAM_CHAT_ID
+            chat_id=TradingConfig.TELEGRAM_CHAT_ID,
+            trading_system=self  # 트레이딩 시스템 참조 전달
         )
         self.execution_manager = ExecutionNoticeManager(callback=self._on_execution_callback)
 
@@ -798,12 +1208,16 @@ class AutoTradingSystem:
 
             self.is_running = True
 
+            # 텔레그램 봇 시작 (별도 스레드)
+            self.telegram.start_bot()
+            logger.info("텔레그램 봇 시작됨")
+
             # WebSocket 체결통보 시작 (별도 스레드)
             ws_thread = threading.Thread(target=self._start_websocket_thread, daemon=True)
             ws_thread.start()
 
             # 텔레그램 시작 알림
-            self.telegram.send_message("🚀 자동매매 시스템 시작")
+            self.telegram.send_message("🚀 자동매매 시스템 시작\n\n/start 명령어로 메뉴를 사용하세요.")
 
             # 메인 루프
             self._main_loop()
@@ -820,6 +1234,7 @@ class AutoTradingSystem:
         logger.info("자동매매 시스템 종료 중...")
         self.is_running = False
         self.telegram.send_message("🛑 자동매매 시스템 종료")
+        self.telegram.stop_bot()
         logger.info("자동매매 시스템 종료 완료")
 
     def _start_websocket_thread(self):
