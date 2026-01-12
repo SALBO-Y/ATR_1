@@ -1,0 +1,56 @@
+# 한국투자증권 자동트레이딩 시스템 설정 파일
+# ==============================================
+
+# 환경 설정
+# "real": 실전투자, "demo": 모의투자
+env_mode: "demo"
+
+# 계좌상품코드
+# 01: 주식투자, 03: 선물옵션, 08: 해외선물옵션, 22: 개인연금저축, 29: 퇴직연금
+product_code: "01"
+
+# 조건검색식 설정
+# condition_name: 사용할 조건검색식 이름 (비워두면 첫번째 조건 사용)
+# condition_seq: 조건검색식 seq (비워두면 자동 조회)
+condition_name: ""
+condition_seq: ""
+
+# 매매 전략 설정
+max_stocks: 5  # 최대 보유 종목 수
+buy_amount: 100000  # 종목당 매수 금액 (원)
+
+# 목표수익률/손절률 (%)
+target_profit_rate: 2.0  # 목표 수익률 (2%)
+stop_loss_rate: -1.5  # 손절률 (-1.5%)
+
+# 시장 구분
+# "J": 코스피, "Q": 코스닥
+market_div: "J"
+
+# 주문 설정
+# 00: 지정가, 01: 시장가, 02: 조건부지정가 등
+order_dvsn_buy: "01"   # 매수 주문구분 (01: 시장가)
+order_dvsn_sell: "01"  # 매도 주문구분 (01: 시장가)
+
+# 시스템 운영 설정
+balance_check_interval: 30  # 잔고 조회 주기 (초)
+condition_check_interval: 60  # 조건검색 재실행 주기 (초)
+
+# 텔레그램 설정
+telegram_enabled: false  # 텔레그램 알림 사용 여부
+telegram_bot_token: ""  # 텔레그램 봇 토큰 (예: "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz")
+telegram_chat_id: ""    # 텔레그램 채팅 ID (예: "123456789")
+
+# 거래 시간 설정
+market_start_time: "09:00:00"  # 장 시작 시간
+market_end_time: "15:30:00"    # 장 마감 시간
+
+# 텔레그램 봇 토큰 및 채팅 ID 발급 방법
+# ==========================================
+# 1. 텔레그램에서 @BotFather 검색
+# 2. /newbot 명령으로 새 봇 생성
+# 3. 봇 토큰 복사하여 telegram_bot_token에 입력
+# 4. 텔레그램에서 @userinfobot 검색
+# 5. 봇과 대화 시작하면 채팅 ID 확인
+# 6. 채팅 ID를 telegram_chat_id에 입력
+# 7. telegram_enabled를 true로 변경
