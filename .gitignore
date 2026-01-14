@@ -175,6 +175,10 @@ cython_debug/
 # ============================================================================
 
 # 환경 설정 파일 (민감 정보 포함)
+kis_devlp.yaml
+!kis_devlp.yaml.example
+trading_config.yaml
+!trading_config.yaml.example
 ~/KIS/config/kis_devlp.yaml
 KIS/config/kis_devlp.yaml
 
