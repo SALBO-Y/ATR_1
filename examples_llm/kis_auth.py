@@ -199,7 +199,8 @@ def changeTREnv(token_key, svr="prod", product=_cfg["my_prod"]):
         my_token = _TRENV.my_token
     except AttributeError:
         my_token = ""
-    cfg["my_token"] = my_token if token_key else token_key
+    # token_key가 있으면 새 토큰 사용, 없으면 기존 토큰 사용
+    cfg["my_token"] = token_key if token_key else my_token
     cfg["my_url_ws"] = _cfg["ops" if svr == "prod" else "vops"]
 
     # print(cfg)
