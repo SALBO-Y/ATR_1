@@ -40,13 +40,36 @@ token_tmp = os.path.join(
     config_root, f"KIS{datetime.today().strftime("%Y%m%d")}"
 )  # 토큰 로컬저장시 파일명 년월일
 
+# 설정 디렉토리가 없으면 생성
+os.makedirs(config_root, exist_ok=True)
+
 # 접근토큰 관리하는 파일 존재여부 체크, 없으면 생성
 if os.path.exists(token_tmp) == False:
     f = open(token_tmp, "w+")
 
 # 앱키, 앱시크리트, 토큰, 계좌번호 등 저장관리, 자신만의 경로와 파일명으로 설정하시기 바랍니다.
 # pip install PyYAML (패키지설치)
-with open(os.path.join(config_root, "kis_devlp.yaml"), encoding="UTF-8") as f:
+
+# kis_devlp.yaml 파일을 여러 위치에서 찾기
+kis_config_paths = [
+    "kis_devlp.yaml",  # 현재 작업 디렉토리
+    os.path.join(config_root, "kis_devlp.yaml"),  # ~/KIS/config/
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "kis_devlp.yaml"),  # 프로젝트 루트
+]
+
+kis_config_file = None
+for path in kis_config_paths:
+    if os.path.exists(path):
+        kis_config_file = path
+        break
+
+if kis_config_file is None:
+    raise FileNotFoundError(
+        f"kis_devlp.yaml 파일을 찾을 수 없습니다. 다음 위치 중 하나에 kis_devlp.yaml.example을 복사하여 kis_devlp.yaml로 이름을 변경하고 실제 정보를 입력하세요:\n" +
+        "\n".join([f"  - {path}" for path in kis_config_paths])
+    )
+
+with open(kis_config_file, encoding="UTF-8") as f:
     _cfg = yaml.load(f, Loader=yaml.FullLoader)
 
 _TRENV = tuple()
