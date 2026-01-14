@@ -88,12 +88,28 @@ class AuthManager:
     def __init__(self, env_mode: str = "demo", product_code: str = "01"):
         self.env_mode = env_mode
         self.product_code = product_code
+        # kis_auth.py가 인식하는 서버 모드로 변환
+        self.server_mode = self._convert_env_mode(env_mode)
+
+    def _convert_env_mode(self, env_mode: str) -> str:
+        """환경 모드를 kis_auth.py가 인식하는 서버 모드로 변환"""
+        mode_map = {
+            "demo": "vps",      # 모의투자
+            "paper": "vps",     # 모의투자
+            "vps": "vps",       # 모의투자
+            "real": "prod",     # 실전투자
+            "prod": "prod",     # 실전투자
+        }
+        converted = mode_map.get(env_mode.lower(), "vps")
+        if converted != env_mode:
+            logger.info(f"환경 모드 변환: {env_mode} → {converted}")
+        return converted
 
     def authenticate(self) -> bool:
         """인증 토큰 발급"""
         try:
-            logger.info(f"인증 시작 (모드: {self.env_mode})")
-            ka.auth(svr=self.env_mode, product=self.product_code)
+            logger.info(f"인증 시작 (모드: {self.env_mode} → {self.server_mode})")
+            ka.auth(svr=self.server_mode, product=self.product_code)
 
             trenv = ka.getTREnv()
             if trenv and trenv.my_token:
