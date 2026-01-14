@@ -152,12 +152,37 @@ class AuthManager:
             logger.info("API 인증 요청 중...")
             ka.auth(svr=self.server_mode, product=self.product_code)
 
+            # getTREnv() 결과 디버깅
             trenv = ka.getTREnv()
+            logger.info(f"getTREnv() 결과: {trenv}")
+
+            if trenv:
+                logger.info(f"trenv 타입: {type(trenv)}")
+                logger.info(f"trenv 속성: {dir(trenv)}")
+
+                # my_token 확인
+                if hasattr(trenv, 'my_token'):
+                    token = trenv.my_token
+                    if token:
+                        logger.info(f"토큰 존재: {token[:10]}... (길이: {len(token)})")
+                    else:
+                        logger.error(f"❌ 토큰이 비어있습니다: {token}")
+                else:
+                    logger.error(f"❌ trenv에 my_token 속성이 없습니다")
+
+                # 계좌 정보 확인
+                if hasattr(trenv, 'my_acct'):
+                    logger.info(f"계좌번호: {trenv.my_acct}")
+                if hasattr(trenv, 'my_prod'):
+                    logger.info(f"상품코드: {trenv.my_prod}")
+            else:
+                logger.error(f"❌ getTREnv()가 None을 반환했습니다")
+
             if trenv and trenv.my_token:
-                logger.info(f"인증 성공 - 계좌: {trenv.my_acct}-{trenv.my_prod}")
+                logger.info(f"✅ 인증 성공 - 계좌: {trenv.my_acct}-{trenv.my_prod}")
                 return True
             else:
-                logger.error("인증 실패 - 토큰 발급 실패")
+                logger.error("❌ 인증 실패 - 토큰 발급 실패")
                 return False
 
         except Exception as e:
