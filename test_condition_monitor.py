@@ -219,35 +219,39 @@ class StockInfoManager:
         self.env_mode = env_mode
 
     def get_stock_price(self, stock_code: str) -> Dict:
-        """종목 현재가 조회"""
+        """종목 현재가 조회 (코스피/코스닥 자동 판단)"""
         try:
-            params = {
-                "FID_COND_MRKT_DIV_CODE": "J",  # J: 주식, ETF, ETN
-                "FID_INPUT_ISCD": stock_code
-            }
-
-            res = ka._url_fetch(
-                "/uapi/domestic-stock/v1/quotations/inquire-price",
-                "FHKST01010100",
-                "",
-                params
-            )
-
-            if res.isOK():
-                output = res.getBody().output
-                return {
-                    "code": stock_code,
-                    "name": output.get("prdy_vrss_sign", ""),  # 종목명은 별도 조회 필요
-                    "current_price": int(output.get("stck_prpr", 0)),  # 현재가
-                    "change_rate": float(output.get("prdy_ctrt", 0)),  # 전일대비율
-                    "change_price": int(output.get("prdy_vrss", 0)),  # 전일대비
-                    "volume": int(output.get("acml_vol", 0)),  # 누적거래량
-                    "high_price": int(output.get("stck_hgpr", 0)),  # 고가
-                    "low_price": int(output.get("stck_lwpr", 0)),  # 저가
+            # 코스피(J), 코스닥(Q) 순서로 시도
+            for market_div in ['J', 'Q']:
+                params = {
+                    "FID_COND_MRKT_DIV_CODE": market_div,
+                    "FID_INPUT_ISCD": stock_code
                 }
-            else:
-                logger.error(f"종목가격 조회 실패: {stock_code}")
-                return None
+
+                res = ka._url_fetch(
+                    "/uapi/domestic-stock/v1/quotations/inquire-price",
+                    "FHKST01010100",
+                    "",
+                    params
+                )
+
+                if res.isOK():
+                    output = res.getBody().output
+                    return {
+                        "code": stock_code,
+                        "name": output.get("prdy_vrss_sign", ""),  # 종목명은 별도 조회 필요
+                        "current_price": int(output.get("stck_prpr", 0)),  # 현재가
+                        "change_rate": float(output.get("prdy_ctrt", 0)),  # 전일대비율
+                        "change_price": int(output.get("prdy_vrss", 0)),  # 전일대비
+                        "volume": int(output.get("acml_vol", 0)),  # 누적거래량
+                        "high_price": int(output.get("stck_hgpr", 0)),  # 고가
+                        "low_price": int(output.get("stck_lwpr", 0)),  # 저가
+                        "market": "코스피" if market_div == 'J' else "코스닥",  # 시장 정보 추가
+                    }
+
+            # 두 시장 모두에서 조회 실패
+            logger.error(f"종목가격 조회 실패 (모든 시장): {stock_code}")
+            return None
 
         except Exception as e:
             logger.error(f"종목가격 조회 오류: {e}")
@@ -460,6 +464,7 @@ class ConditionMonitorSystem:
                 if stock_info:
                     current_price = stock_info['current_price']
                     change_rate = stock_info['change_rate']
+                    market = stock_info.get('market', '')  # 시장 정보 추가
 
                     # 이전 가격과 비교 (가격 추적 활성화된 경우)
                     price_change_info = ""
@@ -478,8 +483,11 @@ class ConditionMonitorSystem:
                     # 등락 이모지
                     emoji = "🔺" if change_rate > 0 else "🔻" if change_rate < 0 else "➖"
 
+                    # 시장 표시
+                    market_badge = f"[{market}] " if market else ""
+
                     message += (
-                        f"{emoji} <b>{idx}. {code}</b>\n"
+                        f"{emoji} <b>{idx}. {market_badge}{code}</b>\n"
                         f"  현재가: {current_price:,}원\n"
                         f"  전일대비: {change_rate:+.2f}%{price_change_info}\n\n"
                     )
