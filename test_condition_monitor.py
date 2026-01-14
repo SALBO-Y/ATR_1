@@ -224,7 +224,26 @@ class ConditionSearchManager:
                 return df
             else:
                 logger.error("조건검색식 목록 조회 실패")
-                res.printError()
+                logger.error(f"rt_cd: {res.getBody().rt_cd}")
+                logger.error(f"msg_cd: {res.getBody().msg_cd}")
+                logger.error(f"msg1: {res.getBody().msg1}")
+
+                # 상세 오류 정보 출력
+                try:
+                    res.printError("/uapi/domestic-stock/v1/quotations/psearch-title")
+                except:
+                    pass
+
+                # 오류 원인 분석
+                if res.getBody().msg_cd == "MCA05762":
+                    logger.info("💡 가능한 원인:")
+                    logger.info("1. HTS(영웅문)에서 조건검색식을 생성하지 않았습니다")
+                    logger.info("2. HTS ID가 다릅니다 (현재: {})".format(user_id))
+                    logger.info("3. 조건검색식이 페이징되어 있습니다")
+                    logger.info("\n해결 방법:")
+                    logger.info("- HTS(영웅문) 실행 → 조건검색 → 조건식 저장")
+                    logger.info("- kis_devlp.yaml의 my_htsid 확인")
+
                 return pd.DataFrame()
 
         except Exception as e:
@@ -282,7 +301,16 @@ class ConditionSearchManager:
                     return []
             else:
                 logger.error("조건검색 실행 실패")
-                res.printError()
+                logger.error(f"rt_cd: {res.getBody().rt_cd}")
+                logger.error(f"msg_cd: {res.getBody().msg_cd}")
+                logger.error(f"msg1: {res.getBody().msg1}")
+
+                # 상세 오류 정보 출력
+                try:
+                    res.printError("/uapi/domestic-stock/v1/quotations/psearch-result")
+                except:
+                    pass
+
                 return []
 
         except Exception as e:
