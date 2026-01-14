@@ -109,6 +109,47 @@ class AuthManager:
         """인증 토큰 발급"""
         try:
             logger.info(f"인증 시작 (모드: {self.env_mode} → {self.server_mode})")
+
+            # 디버그 모드 활성화
+            ka._DEBUG = True
+
+            # 설정 정보 확인 (민감 정보는 마스킹)
+            logger.info(f"서버 모드: {self.server_mode}")
+            logger.info(f"제품 코드: {self.product_code}")
+
+            # kis_devlp.yaml 로드 확인
+            cfg = ka._cfg
+            if self.server_mode == "prod":
+                app_key = cfg.get("my_app", "")
+                app_secret = cfg.get("my_sec", "")
+                account = cfg.get("my_acct_stock", "")
+            else:
+                app_key = cfg.get("paper_app", "")
+                app_secret = cfg.get("paper_sec", "")
+                account = cfg.get("my_paper_stock", "")
+
+            # 마스킹된 정보 출력 (보안)
+            logger.info(f"앱키: {app_key[:4]}{'*' * (len(app_key)-4) if len(app_key) > 4 else '없음'}")
+            logger.info(f"앱시크릿: {app_secret[:4]}{'*' * (len(app_secret)-4) if len(app_secret) > 4 else '없음'}")
+            logger.info(f"계좌번호: {account}")
+
+            # 앱키/시크릿 유효성 검사
+            if not app_key or app_key in ["앱키", "YOUR_APP_KEY", "PS실제앱키여기입력"]:
+                logger.error(f"❌ 앱키가 설정되지 않았습니다. kis_devlp.yaml을 확인하세요.")
+                logger.error(f"   현재 값: {app_key}")
+                return False
+
+            if not app_secret or app_secret in ["앱키 시크릿", "YOUR_APP_SECRET", "실제시크릿키여기입력"]:
+                logger.error(f"❌ 앱시크릿이 설정되지 않았습니다. kis_devlp.yaml을 확인하세요.")
+                logger.error(f"   현재 값: {app_secret}")
+                return False
+
+            if not account or account in ["증권계좌 8자리", "12345678"]:
+                logger.warning(f"⚠️  계좌번호가 기본값입니다. kis_devlp.yaml을 확인하세요.")
+                logger.warning(f"   현재 값: {account}")
+
+            # 인증 실행
+            logger.info("API 인증 요청 중...")
             ka.auth(svr=self.server_mode, product=self.product_code)
 
             trenv = ka.getTREnv()

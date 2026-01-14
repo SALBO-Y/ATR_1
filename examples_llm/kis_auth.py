@@ -236,18 +236,65 @@ def auth(svr="prod", product=_cfg["my_prod"], url=None):
     # print("saved_token: ", saved_token)
     if saved_token is None:  # 기존 발급 토큰 확인이 안되면 발급처리
         url = f"{_cfg[svr]}/oauth2/tokenP"
+
+        if _DEBUG:
+            print(f"[DEBUG] 토큰 발급 요청")
+            print(f"[DEBUG] URL: {url}")
+            print(f"[DEBUG] 앱키: {p['appkey'][:4]}{'*' * (len(p['appkey'])-4)}")
+            print(f"[DEBUG] 앱시크릿: {p['appsecret'][:4]}{'*' * (len(p['appsecret'])-4)}")
+
         res = requests.post(
             url, data=json.dumps(p), headers=_getBaseHeader()
         )  # 토큰 발급
         rescode = res.status_code
+
+        if _DEBUG:
+            print(f"[DEBUG] 응답 코드: {rescode}")
+
         if rescode == 200:  # 토큰 정상 발급
+            if _DEBUG:
+                print(f"[DEBUG] 응답 본문: {res.json()}")
+
             my_token = _getResultObject(res.json()).access_token  # 토큰값 가져오기
             my_expired = _getResultObject(
                 res.json()
             ).access_token_token_expired  # 토큰값 만료일시 가져오기
             save_token(my_token, my_expired)  # 새로 발급 받은 토큰 저장
+
+            if _DEBUG:
+                print(f"[DEBUG] 토큰 발급 성공: {my_token[:10]}...")
         else:
-            print("Get Authentification token fail!\nYou have to restart your app!!!")
+            print("=" * 80)
+            print("❌ API 인증 실패!")
+            print("=" * 80)
+            print(f"HTTP 상태 코드: {rescode}")
+            print(f"요청 URL: {url}")
+            print(f"앱키(마스킹): {p['appkey'][:4]}{'*' * (len(p['appkey'])-4)}")
+
+            try:
+                error_response = res.json()
+                print(f"오류 응답: {json.dumps(error_response, indent=2, ensure_ascii=False)}")
+
+                # 한투 API 오류 메시지 파싱
+                if 'msg1' in error_response:
+                    print(f"오류 메시지: {error_response['msg1']}")
+                if 'msg_cd' in error_response:
+                    print(f"오류 코드: {error_response['msg_cd']}")
+            except:
+                print(f"응답 본문(텍스트): {res.text}")
+
+            print("=" * 80)
+            print("\n가능한 원인:")
+            print("1. 앱키/앱시크릿이 잘못되었습니다")
+            print("2. 실전투자/모의투자 키를 바꿔 사용했습니다")
+            print("3. 한투 OpenAPI 서비스 상태를 확인하세요")
+            print("4. kis_devlp.yaml 파일의 키 값을 확인하세요")
+            print("\nkis_devlp.yaml 확인 사항:")
+            print("- my_app: 실전투자 앱키 (PS로 시작)")
+            print("- my_sec: 실전투자 앱시크릿")
+            print("- paper_app: 모의투자 앱키 (PS로 시작)")
+            print("- paper_sec: 모의투자 앱시크릿")
+            print("=" * 80)
             return
     else:
         my_token = saved_token  # 기존 발급 토큰 확인되어 기존 토큰 사용
