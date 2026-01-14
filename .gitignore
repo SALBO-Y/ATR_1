@@ -124,6 +124,10 @@ celerybeat.pid
 
 # Environments
 .env
+.env.local
+.env.*.local
+*.env
+!.env.example
 .venv
 env/
 venv/
@@ -165,3 +169,23 @@ cython_debug/
 *.lock
 
 *_logs/
+
+# ============================================================================
+# 자동매매 시스템 관련
+# ============================================================================
+
+# 환경 설정 파일 (민감 정보 포함)
+~/KIS/config/kis_devlp.yaml
+KIS/config/kis_devlp.yaml
+
+# 로그 파일
+auto_trading_*.log
+condition_monitor_*.log
+
+# 임시 데이터 파일
+*.tmp
+*.bak
+
+# IDE 설정
+.vscode/
+.idea/
