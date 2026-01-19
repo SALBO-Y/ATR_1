@@ -4,6 +4,109 @@
 - 샘플 코드는 별도의 공지 없이 지속적으로 업데이트될 수 있습니다.
 - 샘플 코드를 활용하여 제작한 고객님의 프로그램으로 인한 손해에 대해서는 당사에서 책임지지 않습니다.
 
+---
+
+# 🚨 자동매매 시스템 개발 프로젝트 (genspark 브랜치)
+
+## ⚠️ 현재 상태: API 연동 검증 완료
+
+**검증일**: 2026-01-19  
+**결과**: ❌ **현재 코드는 실제 API 연동이 불가능한 상태입니다**
+
+### 📋 검증 결과 요약
+
+| 구현 항목 | 상태 | 비고 |
+|----------|------|------|
+| 토큰 발급/관리 | ❌ 미구현 | Critical |
+| REST API 호출 | ❌ 미구현 | Critical |
+| WebSocket 파싱 | ❌ 미구현 | Critical |
+| 주문 실행 | ❌ 미구현 | Critical |
+| 잔고 조회 | ❌ 미구현 | Critical |
+| 전략 로직 | ✅ 구현됨 | 골격만 존재 |
+
+**구현률**: 약 15% (골격만 있고 핵심 API 연동 없음)
+
+### 📁 주요 문서
+
+1. **`VERIFICATION_SUMMARY.md`** - 검증 결과 요약 (간단 버전)
+2. **`API_VERIFICATION_REPORT.md`** - 상세 검증 보고서 (20KB, 750줄)
+3. **`test_kis_api.py`** - API 연동 테스트 스크립트
+
+### 🧪 즉시 실행 가능한 테스트
+
+```bash
+# API 키 정상 작동 여부 확인
+python3 test_kis_api.py
+
+# 1. 토큰 발급 테스트
+# 2. 잔고 조회 테스트
+# 3. 삼성전자 현재가 조회 테스트
+```
+
+### 📊 문제점 요약
+
+#### 1. 인증 (Authentication) - 🔴 Critical
+```python
+# 현재 코드
+class KISAuth:
+    def __init__(self, cfg):
+        self.token = None  # ❌ 토큰 발급 로직 없음
+```
+
+**필요 구현**: 
+- `/oauth2/tokenP` API 호출
+- 토큰 파일 저장/읽기
+- 자동 갱신 로직
+
+#### 2. REST API 호출 - 🔴 Critical
+```python
+# 현재 코드
+def buy(self, code, price, quantity):
+    pass  # ❌ 빈 구현
+```
+
+**필요 구현**:
+- TR ID 매핑 (TTTC0012U, VTTC0012U)
+- 헤더 구성 (authorization, appkey, tr_id)
+- Body 파라미터 (대문자 필수)
+
+#### 3. WebSocket 파싱 - 🔴 Critical
+```python
+# 현재: 암호화된 문자열 그대로 전달
+data = parts[3]  # ❌ AES256 복호화 없음
+```
+
+**필요 구현**:
+- AES256-CBC 복호화
+- '^' 구분자 파싱
+- 컬럼 매핑
+
+### 🛠️ 권장 조치
+
+**코드 재작성을 권장합니다** (기존 코드 수정보다 빠르고 안전)
+
+**참고할 공식 예제**:
+```
+examples_user/
+├── kis_auth.py                      # 인증 관리
+├── domestic_stock/
+│   ├── domestic_stock_functions.py  # REST API 함수
+│   └── domestic_stock_functions_ws.py # WebSocket 함수
+
+examples_llm/domestic_stock/
+├── order_cash/order_cash.py         # 주문 API
+├── inquire_balance/inquire_balance.py # 잔고 조회
+```
+
+### 📌 다음 단계
+
+1. ✅ `test_kis_api.py` 실행 → API 키 검증
+2. ⚠️ 기존 코드 폐기 결정
+3. 🆕 공식 예제 기반 새 코드 작성
+4. 🧪 단계별 테스트하며 개발
+
+---
+
 # KIS Open API 샘플 코드 저장소 (LLM 지원)
 
 ## 1. 제작 의도 및 대상
@@ -34,6 +137,9 @@
 # 프로젝트 구조
 .
 ├── README.md                    # 프로젝트 설명서
+├── VERIFICATION_SUMMARY.md      # ⚠️ API 연동 검증 요약
+├── API_VERIFICATION_REPORT.md   # 📋 상세 검증 보고서
+├── test_kis_api.py              # 🧪 API 연동 테스트 스크립트
 ├── docs/
 │   └── convention.md            # 코딩 컨벤션 가이드
 ├── examples_llm/                  # LLM용 샘플 코드
@@ -298,7 +404,7 @@ ka.auth(svr="prod")  # 또는 "vps"
 
 - `kis_devlp.yaml` 파일의 앱키, 앱시크릿이 올바른지 확인
 - 계좌번호 형식이 맞는지 확인 (앞 8자리 + 뒤 2자리)
-- 실시간 시세(WebSocket) 이용 중 ‘No close frame received’ 오류가 발생하는 경우, `kis_devlp.yaml`에 입력하신 HTS ID가 정확한지 확인
+- 실시간 시세(WebSocket) 이용 중 'No close frame received' 오류가 발생하는 경우, `kis_devlp.yaml`에 입력하신 HTS ID가 정확한지 확인
 
 ### 의존성 오류 시
 
