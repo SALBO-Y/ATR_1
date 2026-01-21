@@ -68,12 +68,22 @@ DEFAULT_CONFIG = {
         "server": "vps"  # prod: 실전투자, vps: 모의투자
     },
     "trading": {
-        "enabled": False,
-        "buy_amount": 1000000,
-        "profit_target": 0.03,
-        "trailing_stop": 0.02,
-        "stop_loss": 0.025,
-        "check_interval": 5
+        "domestic": {
+            "enabled": False,
+            "buy_amount": 1000000,
+            "profit_target": 0.03,
+            "trailing_stop": 0.02,
+            "stop_loss": 0.025,
+            "check_interval": 5
+        },
+        "overseas": {
+            "enabled": False,
+            "buy_amount": 1000,  # USD
+            "profit_target": 0.03,
+            "trailing_stop": 0.02,
+            "stop_loss": 0.025,
+            "check_interval": 5
+        }
     },
     "webhook": {
         "enabled": True,
@@ -486,6 +496,299 @@ class KISOrder:
 
 
 # ============================================================================
+# 해외주식 시세 조회
+# ============================================================================
+class KISOverseasMarket:
+    """한국투자증권 해외주식 시세 조회"""
+    
+    def __init__(self, auth: KISAuth, yaml_cfg):
+        self.auth = auth
+        self.yaml_cfg = yaml_cfg
+    
+    def get_stock_name(self, code: str, exchange: str = "NASDAQ") -> str:
+        """해외 종목명 조회"""
+        # 간단히 종목코드 반환 (해외는 종목코드가 곧 티커)
+        return code
+    
+    def get_current_price(self, code: str, exchange: str = "NASDAQ") -> Optional[float]:
+        """해외주식 현재가 조회"""
+        url = f"{self.auth.base_url}/uapi/overseas-price/v1/quotations/price"
+        
+        # 거래소 코드 매핑
+        exchange_map = {
+            "NASDAQ": "NAS",
+            "NYSE": "NYS",
+            "AMEX": "AMS",
+            "홍콩": "HKS",
+            "상해": "SHS",
+            "심천": "SZS",
+            "동경": "TSE",
+            "호치민": "HSX",
+            "하노이": "HNX"
+        }
+        
+        excd = exchange_map.get(exchange, "NAS")
+        
+        headers = {
+            "Content-Type": "application/json",
+            "authorization": f"Bearer {self.auth.get_token()}",
+            "appkey": self.auth.app_key,
+            "appsecret": self.auth.app_secret,
+            "tr_id": "HHDFS00000300",  # 해외주식 현재가
+            "custtype": "P"
+        }
+        
+        params = {
+            "AUTH": "",
+            "EXCD": excd,
+            "SYMB": code
+        }
+        
+        try:
+            res = requests.get(url, headers=headers, params=params)
+            
+            if res.status_code == 200:
+                data = res.json()
+                if data["rt_cd"] == "0":
+                    price = float(data["output"]["last"])
+                    return price
+        
+        except Exception as e:
+            logger.error(f"❌ 해외주식 현재가 조회 오류 ({code}): {e}")
+        
+        return None
+
+
+# ============================================================================
+# 해외주식 주문
+# ============================================================================
+class KISOverseasOrder:
+    """한국투자증권 해외주식 주문 실행"""
+    
+    def __init__(self, auth: KISAuth, yaml_cfg, config):
+        self.auth = auth
+        self.yaml_cfg = yaml_cfg
+        self.config = config
+        
+        # kis_devlp.yaml에서 계좌 정보 가져오기
+        if auth.server == "prod":
+            self.account = yaml_cfg.get("my_acct_stock", "")
+        else:
+            self.account = yaml_cfg.get("my_paper_stock", "")
+        
+        self.product = yaml_cfg.get("my_prod", "01")
+        self.market = KISOverseasMarket(auth, yaml_cfg)
+    
+    def buy(self, code: str, amount: float, exchange: str = "NASDAQ") -> Dict:
+        """해외주식 매수"""
+        # 현재가 조회
+        current_price = self.market.get_current_price(code, exchange)
+        
+        if not current_price:
+            return {"success": False, "error": "현재가 조회 실패"}
+        
+        # 수량 계산 (USD 금액 / 주가)
+        quantity = int(amount / current_price)
+        
+        if quantity <= 0:
+            return {"success": False, "error": "수량 계산 오류"}
+        
+        # 거래소 코드 매핑
+        exchange_map = {
+            "NASDAQ": "NASD",
+            "NYSE": "NYSE",
+            "AMEX": "AMEX",
+            "홍콩": "SEHK",
+            "상해": "SHAA",
+            "심천": "SZAA",
+            "동경": "TKSE",
+            "호치민": "HOSE",
+            "하노이": "HNSE"
+        }
+        
+        ovrs_excg_cd = exchange_map.get(exchange, "NASD")
+        
+        url = f"{self.auth.base_url}/uapi/overseas-stock/v1/trading/order"
+        
+        # TR ID
+        if self.auth.server == "prod":
+            tr_id = "TTTT1002U"  # 실전 매수
+        else:
+            tr_id = "VTTT1002U"  # 모의 매수
+        
+        headers = {
+            "Content-Type": "application/json",
+            "authorization": f"Bearer {self.auth.get_token()}",
+            "appkey": self.auth.app_key,
+            "appsecret": self.auth.app_secret,
+            "tr_id": tr_id,
+            "custtype": "P"
+        }
+        
+        body = {
+            "CANO": self.account,
+            "ACNT_PRDT_CD": self.product,
+            "OVRS_EXCG_CD": ovrs_excg_cd,
+            "PDNO": code,
+            "ORD_DVSN": "00",  # 지정가
+            "ORD_QTY": str(quantity),
+            "OVRS_ORD_UNPR": str(current_price),
+            "ORD_SVR_DVSN_CD": "0"  # 기본
+        }
+        
+        try:
+            res = requests.post(url, headers=headers, json=body)
+            
+            if res.status_code == 200:
+                data = res.json()
+                
+                if data["rt_cd"] == "0":
+                    logger.info(f"✅ 해외주식 매수 성공: {code} {quantity}주 @ ${current_price}")
+                    
+                    return {
+                        "success": True,
+                        "code": code,
+                        "price": current_price,
+                        "quantity": quantity,
+                        "order_id": data["output"].get("ODNO", "")
+                    }
+                else:
+                    logger.error(f"❌ 해외주식 매수 실패: {data.get('msg1', 'Unknown error')}")
+                    return {"success": False, "error": data.get("msg1", "Unknown error")}
+        
+        except Exception as e:
+            logger.error(f"❌ 해외주식 매수 오류: {e}")
+            return {"success": False, "error": str(e)}
+        
+        return {"success": False}
+    
+    def sell(self, code: str, quantity: int, exchange: str = "NASDAQ") -> Dict:
+        """해외주식 매도"""
+        # 현재가 조회
+        current_price = self.market.get_current_price(code, exchange)
+        
+        if not current_price:
+            return {"success": False, "error": "현재가 조회 실패"}
+        
+        # 거래소 코드 매핑
+        exchange_map = {
+            "NASDAQ": "NASD",
+            "NYSE": "NYSE",
+            "AMEX": "AMEX",
+            "홍콩": "SEHK",
+            "상해": "SHAA",
+            "심천": "SZAA",
+            "동경": "TKSE",
+            "호치민": "HOSE",
+            "하노이": "HNSE"
+        }
+        
+        ovrs_excg_cd = exchange_map.get(exchange, "NASD")
+        
+        url = f"{self.auth.base_url}/uapi/overseas-stock/v1/trading/order"
+        
+        # TR ID
+        if self.auth.server == "prod":
+            tr_id = "TTTT1006U"  # 실전 매도
+        else:
+            tr_id = "VTTT1006U"  # 모의 매도
+        
+        headers = {
+            "Content-Type": "application/json",
+            "authorization": f"Bearer {self.auth.get_token()}",
+            "appkey": self.auth.app_key,
+            "appsecret": self.auth.app_secret,
+            "tr_id": tr_id,
+            "custtype": "P"
+        }
+        
+        body = {
+            "CANO": self.account,
+            "ACNT_PRDT_CD": self.product,
+            "OVRS_EXCG_CD": ovrs_excg_cd,
+            "PDNO": code,
+            "ORD_DVSN": "00",  # 지정가
+            "ORD_QTY": str(quantity),
+            "OVRS_ORD_UNPR": str(current_price),
+            "ORD_SVR_DVSN_CD": "0"
+        }
+        
+        try:
+            res = requests.post(url, headers=headers, json=body)
+            
+            if res.status_code == 200:
+                data = res.json()
+                
+                if data["rt_cd"] == "0":
+                    logger.info(f"✅ 해외주식 매도 성공: {code} {quantity}주 @ ${current_price}")
+                    
+                    return {
+                        "success": True,
+                        "code": code,
+                        "price": current_price,
+                        "quantity": quantity
+                    }
+                else:
+                    logger.error(f"❌ 해외주식 매도 실패: {data.get('msg1', 'Unknown error')}")
+                    return {"success": False, "error": data.get("msg1", "Unknown error")}
+        
+        except Exception as e:
+            logger.error(f"❌ 해외주식 매도 오류: {e}")
+            return {"success": False, "error": str(e)}
+        
+        return {"success": False}
+    
+    def get_balance(self) -> Dict:
+        """해외주식 잔고 조회"""
+        url = f"{self.auth.base_url}/uapi/overseas-stock/v1/trading/inquire-balance"
+        
+        # TR ID
+        if self.auth.server == "prod":
+            tr_id = "TTTS3012R"  # 실전
+        else:
+            tr_id = "VTTS3012R"  # 모의
+        
+        headers = {
+            "Content-Type": "application/json",
+            "authorization": f"Bearer {self.auth.get_token()}",
+            "appkey": self.auth.app_key,
+            "appsecret": self.auth.app_secret,
+            "tr_id": tr_id,
+            "custtype": "P"
+        }
+        
+        params = {
+            "CANO": self.account,
+            "ACNT_PRDT_CD": self.product,
+            "OVRS_EXCG_CD": "NASD",  # 기본 나스닥
+            "TR_CRCY_CD": "USD",
+            "CTX_AREA_FK200": "",
+            "CTX_AREA_NK200": ""
+        }
+        
+        try:
+            res = requests.get(url, headers=headers, params=params)
+            
+            if res.status_code == 200:
+                data = res.json()
+                
+                if data["rt_cd"] == "0":
+                    output2 = data["output2"] if data["output2"] else {}
+                    
+                    return {
+                        "success": True,
+                        "cash": float(output2.get("frcr_dncl_amt_2", "0")),  # USD 예수금
+                        "total_value": float(output2.get("tot_asst_amt", "0")),  # 총자산
+                        "stocks": data["output1"]
+                    }
+        
+        except Exception as e:
+            logger.error(f"❌ 해외주식 잔고 조회 오류: {e}")
+        
+        return {"success": False}
+
+
+# ============================================================================
 # 포지션 관리
 # ============================================================================
 class PositionManager:
@@ -510,7 +813,7 @@ class PositionManager:
         with open(POSITION_FILE, 'w', encoding='utf-8') as f:
             json.dump(self.positions, f, ensure_ascii=False, indent=2)
     
-    def add_position(self, code: str, name: str, buy_price: float, quantity: int, strategy: str):
+    def add_position(self, code: str, name: str, buy_price: float, quantity: int, strategy: str, market_type: str = "domestic"):
         """포지션 추가"""
         self.positions[code] = {
             "code": code,
@@ -518,6 +821,7 @@ class PositionManager:
             "buy_price": buy_price,
             "quantity": quantity,
             "strategy": strategy,
+            "market_type": market_type,  # domestic or overseas
             "entry_time": datetime.now().isoformat(),
             "status": "active",
             "peak_price": buy_price
@@ -528,9 +832,14 @@ class PositionManager:
         """포지션 존재 여부"""
         return code in self.positions
     
-    def get_active_positions(self) -> List[Dict]:
+    def get_active_positions(self, market_type: str = None) -> List[Dict]:
         """활성 포지션 목록"""
-        return [p for p in self.positions.values() if p["status"] in ["active", "partial_sold"]]
+        positions = [p for p in self.positions.values() if p["status"] in ["active", "partial_sold"]]
+        
+        if market_type:
+            positions = [p for p in positions if p.get("market_type", "domestic") == market_type]
+        
+        return positions
     
     def update_position(self, code: str, updates: Dict):
         """포지션 업데이트"""
@@ -571,6 +880,9 @@ class TelegramBot:
         self.app.add_handler(CommandHandler("off", self.cmd_off))
         self.app.add_handler(CommandHandler("help", self.cmd_help))
         
+        # 콜백 쿼리 핸들러 (버튼 클릭)
+        self.app.add_handler(CallbackQueryHandler(self.handle_callback))
+        
         # 트레이딩뷰 알림 수신 (텍스트 메시지)
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_alert))
         
@@ -578,15 +890,23 @@ class TelegramBot:
     
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """봇 시작"""
+        keyboard = [
+            [InlineKeyboardButton("📊 시스템 상태", callback_data="status")],
+            [
+                InlineKeyboardButton("🇰🇷 국내주식", callback_data="domestic_menu"),
+                InlineKeyboardButton("🌎 해외주식", callback_data="overseas_menu")
+            ],
+            [InlineKeyboardButton("💰 전체 잔고", callback_data="balance_all")],
+            [InlineKeyboardButton("❓ 도움말", callback_data="help")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
             "🤖 트레이딩뷰 자동매매 봇\n\n"
-            "명령어:\n"
-            "/status - 현재 상태\n"
-            "/positions - 보유 종목\n"
-            "/balance - 잔고 조회\n"
-            "/on - 자동매매 시작\n"
-            "/off - 자동매매 중지\n"
-            "/help - 도움말"
+            "국내주식 + 해외주식 자동매매\n\n"
+            "📱 아래 버튼을 선택하세요:",
+            reply_markup=reply_markup
         )
     
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -730,8 +1050,14 @@ class TradingSystem:
         
         # KIS 초기화
         self.auth = KISAuth(self.yaml_cfg, self.config["kis"]["server"])
+        
+        # 국내주식
         self.market = KISMarket(self.auth, self.yaml_cfg)
         self.order = KISOrder(self.auth, self.yaml_cfg, self.config)
+        
+        # 해외주식
+        self.overseas_market = KISOverseasMarket(self.auth, self.yaml_cfg)
+        self.overseas_order = KISOverseasOrder(self.auth, self.yaml_cfg, self.config)
         
         # 포지션 관리
         self.position_mgr = PositionManager()
@@ -742,7 +1068,7 @@ class TradingSystem:
         # 모니터링 스레드
         self.monitoring = False
         
-        logger.info("✅ TradingSystem 초기화 완료")
+        logger.info("✅ TradingSystem 초기화 완료 (국내+해외)")
     
     def load_config(self) -> Dict:
         """설정 로드"""
@@ -765,11 +1091,51 @@ class TradingSystem:
         with open(YAML_FILE, encoding="UTF-8") as f:
             return yaml.load(f, Loader=yaml.FullLoader)
     
-    def process_buy_signal(self, code: str, name: str, strategy: str) -> Dict:
+    def process_buy_signal(self, code: str, name: str, strategy: str, market_type: str = "domestic", exchange: str = "KOSPI") -> Dict:
         """매수 신호 처리"""
+        # 시장 타입별 설정 확인
+        if market_type == "domestic":
+            trading_config = self.config["trading"]["domestic"]
+        else:
+            trading_config = self.config["trading"]["overseas"]
+        
         # 자동매매 활성화 체크
-        if not self.config["trading"]["enabled"]:
-            return {"success": False, "error": "자동매매 비활성화"}
+        if not trading_config["enabled"]:
+            return {"success": False, "error": f"{market_type} 자동매매 비활성화"}
+        
+        # 중복 진입 방지
+        if self.position_mgr.has_position(code):
+            return {"success": False, "error": "이미 보유 중"}
+        
+        # 매수 주문 (시장 타입에 따라)
+        buy_amount = trading_config["buy_amount"]
+        
+        if market_type == "domestic":
+            result = self.order.buy(code, buy_amount)
+        else:
+            result = self.overseas_order.buy(code, buy_amount, exchange)
+        
+        if result["success"]:
+            # 포지션 생성
+            self.position_mgr.add_position(
+                code=code,
+                name=name,
+                buy_price=result["price"],
+                quantity=result["quantity"],
+                strategy=strategy,
+                market_type=market_type
+            )
+            
+            return {
+                "success": True,
+                "code": code,
+                "name": name,
+                "price": result["price"],
+                "quantity": result["quantity"],
+                "market_type": market_type
+            }
+        
+        return result
         
         # 중복 진입 방지
         if self.position_mgr.has_position(code):
