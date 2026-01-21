@@ -20,6 +20,14 @@ from collections import defaultdict
 
 import yaml
 
+# Flask (Webhook 서버용)
+try:
+    from flask import Flask, request, jsonify
+    FLASK_OK = True
+except:
+    FLASK_OK = False
+    print("⚠️ Flask 설치 필요: pip install flask")
+
 # 텔레그램
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -66,6 +74,11 @@ DEFAULT_CONFIG = {
         "trailing_stop": 0.02,
         "stop_loss": 0.025,
         "check_interval": 5
+    },
+    "webhook": {
+        "enabled": True,
+        "port": 8080,
+        "secret_token": ""  # 보안을 위한 토큰 (선택)
     }
 }
 
@@ -822,20 +835,137 @@ class TradingSystem:
             thread.start()
             logger.info("🚀 포지션 모니터링 시작")
     
-    def run(self):
+    def run(self, webhook_mode=False):
         """시스템 실행"""
         # 텔레그램 봇 초기화
         try:
             self.telegram = TelegramBot(self.config, self)
         except Exception as e:
             logger.error(f"❌ 텔레그램 봇 초기화 실패: {e}")
-            return
+            if not webhook_mode:
+                return
         
         # 모니터링 시작
         self.start_monitoring()
         
-        # 봇 실행
-        self.telegram.run()
+        # Webhook 모드가 아니면 봇 실행
+        if not webhook_mode:
+            self.telegram.run()
+
+
+# ============================================================================
+# Webhook 서버
+# ============================================================================
+class WebhookServer:
+    """트레이딩뷰 Webhook 서버"""
+    
+    def __init__(self, system: TradingSystem):
+        self.system = system
+        self.config = system.config
+        self.app = Flask(__name__)
+        
+        # 로깅 제거 (Flask 기본 로그 비활성화)
+        import logging as flask_logging
+        flask_log = flask_logging.getLogger('werkzeug')
+        flask_log.setLevel(flask_logging.ERROR)
+        
+        # 라우트 등록
+        self.app.add_url_rule('/webhook', 'webhook', self.handle_webhook, methods=['POST'])
+        self.app.add_url_rule('/health', 'health', self.health_check, methods=['GET'])
+        
+        logger.info("🌐 Webhook 서버 초기화 완료")
+    
+    def handle_webhook(self):
+        """Webhook 요청 처리"""
+        try:
+            data = request.get_json()
+            
+            if not data:
+                return jsonify({"status": "error", "message": "Invalid JSON"}), 400
+            
+            # 보안 토큰 확인
+            secret_token = self.config["webhook"].get("secret_token", "")
+            if secret_token:
+                if data.get("token") != secret_token:
+                    logger.warning("⚠️ Webhook 토큰 불일치")
+                    return jsonify({"status": "error", "message": "Unauthorized"}), 401
+            
+            # 액션 파싱
+            action = data.get("action", "").upper()
+            ticker = data.get("ticker", "")
+            price = data.get("price", "")
+            time_str = data.get("time", "")
+            
+            # BUY 신호 처리
+            if action == "BUY" and ticker:
+                logger.info(f"🚀 Webhook 매수 신호: {ticker}")
+                
+                # 종목명 조회
+                name = self.system.market.get_stock_name(ticker)
+                
+                # 매수 실행
+                result = self.system.process_buy_signal(ticker, name, "TradingView")
+                
+                if result["success"]:
+                    # 텔레그램 알림
+                    if self.system.telegram:
+                        try:
+                            self.system.telegram.send_message(
+                                f"🚀 매수 체결 (Webhook)\n\n"
+                                f"종목: [{ticker}] {name}\n"
+                                f"가격: {result['price']:,}원\n"
+                                f"수량: {result['quantity']:,}주\n"
+                                f"금액: {result['price']*result['quantity']:,}원"
+                            )
+                        except:
+                            pass
+                    
+                    return jsonify({
+                        "status": "success",
+                        "message": f"Buy signal received for {ticker}",
+                        "data": {
+                            "code": ticker,
+                            "name": name,
+                            "price": result['price'],
+                            "quantity": result['quantity']
+                        }
+                    })
+                else:
+                    return jsonify({
+                        "status": "error",
+                        "message": result.get("error", "Buy failed")
+                    }), 400
+            
+            return jsonify({"status": "error", "message": "Invalid action"}), 400
+        
+        except Exception as e:
+            logger.error(f"❌ Webhook 처리 오류: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    
+    def health_check(self):
+        """헬스 체크"""
+        return jsonify({
+            "status": "ok",
+            "service": "TradingView Bot Webhook",
+            "enabled": self.config["trading"]["enabled"],
+            "positions": len(self.system.position_mgr.get_active_positions())
+        })
+    
+    def run(self):
+        """서버 실행"""
+        port = self.config["webhook"].get("port", 8080)
+        
+        logger.info(f"🌐 Webhook 서버 시작: http://0.0.0.0:{port}/webhook")
+        logger.info(f"💡 헬스 체크: http://0.0.0.0:{port}/health")
+        
+        # 별도 스레드에서 텔레그램 봇 실행
+        if self.system.telegram:
+            bot_thread = threading.Thread(target=self.system.telegram.run, daemon=True)
+            bot_thread.start()
+            logger.info("📱 텔레그램 봇 시작...")
+        
+        # Flask 서버 실행
+        self.app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 
 # ============================================================================
@@ -859,7 +989,24 @@ def main():
     # 시스템 실행
     try:
         system = TradingSystem()
-        system.run()
+        
+        # Webhook 모드 확인
+        webhook_enabled = system.config.get("webhook", {}).get("enabled", False)
+        
+        if webhook_enabled and FLASK_OK:
+            logger.info("🚀 Webhook 모드로 시작...")
+            
+            # Webhook 서버 실행
+            webhook_server = WebhookServer(system)
+            webhook_server.run()
+        else:
+            if webhook_enabled and not FLASK_OK:
+                logger.warning("⚠️ Flask 설치 필요: pip install flask")
+                logger.info("🔄 일반 모드로 실행...")
+            
+            # 일반 모드 (텔레그램만)
+            system.run()
+    
     except KeyboardInterrupt:
         print("\n\n시스템 종료")
     except Exception as e:

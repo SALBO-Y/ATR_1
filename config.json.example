@@ -13,5 +13,10 @@
     "trailing_stop": 0.02,
     "stop_loss": 0.025,
     "check_interval": 5
+  },
+  "webhook": {
+    "enabled": true,
+    "port": 8080,
+    "secret_token": ""
   }
 }
