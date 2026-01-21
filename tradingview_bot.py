@@ -201,6 +201,65 @@ class KISMarket:
         self.auth = auth
         self.yaml_cfg = yaml_cfg
     
+    def get_stock_name(self, code: str) -> str:
+        """종목명 조회 (마스터 조회 API 사용)"""
+        url = f"{self.auth.base_url}/uapi/domestic-stock/v1/quotations/search-stock-info"
+        
+        headers = {
+            "Content-Type": "application/json",
+            "authorization": f"Bearer {self.auth.get_token()}",
+            "appkey": self.auth.app_key,
+            "appsecret": self.auth.app_secret,
+            "tr_id": "CTPF1002R",
+            "custtype": "P"
+        }
+        
+        params = {
+            "PRDT_TYPE_CD": "300",  # 주식
+            "PDNO": code
+        }
+        
+        try:
+            res = requests.get(url, headers=headers, params=params)
+            
+            if res.status_code == 200:
+                data = res.json()
+                if data["rt_cd"] == "0" and data.get("output"):
+                    # 종목명 추출
+                    name = data["output"].get("prdt_name", "")
+                    if name:
+                        return name
+        
+        except Exception as e:
+            logger.debug(f"종목명 조회 API 1차 실패, 2차 시도 중... ({code})")
+        
+        # 2차 시도: 현재가 조회 API에서 종목명 추출
+        try:
+            url = f"{self.auth.base_url}/uapi/domestic-stock/v1/quotations/inquire-price"
+            
+            headers["tr_id"] = "FHKST01010100"
+            
+            params = {
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": code
+            }
+            
+            res = requests.get(url, headers=headers, params=params)
+            
+            if res.status_code == 200:
+                data = res.json()
+                if data["rt_cd"] == "0":
+                    # 한글종목명 필드 확인
+                    name = data["output"].get("hts_kor_isnm", "")
+                    if name:
+                        return name
+        
+        except Exception as e:
+            logger.error(f"❌ 종목명 조회 오류 ({code}): {e}")
+        
+        # 실패 시 종목코드 반환
+        return code
+    
     def get_current_price(self, code: str) -> Optional[float]:
         """현재가 조회"""
         url = f"{self.auth.base_url}/uapi/domestic-stock/v1/quotations/inquire-price"
