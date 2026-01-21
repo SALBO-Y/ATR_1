@@ -813,7 +813,7 @@ class PositionManager:
         with open(POSITION_FILE, 'w', encoding='utf-8') as f:
             json.dump(self.positions, f, ensure_ascii=False, indent=2)
     
-    def add_position(self, code: str, name: str, buy_price: float, quantity: int, strategy: str, market_type: str = "domestic"):
+    def add_position(self, code: str, name: str, buy_price: float, quantity: int, strategy: str, market_type: str = "domestic", exchange: str = "KOSPI"):
         """포지션 추가"""
         self.positions[code] = {
             "code": code,
@@ -822,6 +822,7 @@ class PositionManager:
             "quantity": quantity,
             "strategy": strategy,
             "market_type": market_type,  # domestic or overseas
+            "exchange": exchange,  # KOSPI, NASDAQ, etc.
             "entry_time": datetime.now().isoformat(),
             "status": "active",
             "peak_price": buy_price
@@ -911,18 +912,25 @@ class TelegramBot:
     
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """상태 조회"""
-        enabled = self.config["trading"]["enabled"]
-        positions = self.system.position_mgr.get_active_positions()
+        domestic_enabled = self.config["trading"]["domestic"]["enabled"]
+        overseas_enabled = self.config["trading"]["overseas"]["enabled"]
         
-        status_text = "✅ 활성화" if enabled else "❌ 비활성화"
+        domestic_positions = self.system.position_mgr.get_active_positions("domestic")
+        overseas_positions = self.system.position_mgr.get_active_positions("overseas")
+        
+        domestic_status = "✅ 활성화" if domestic_enabled else "❌ 비활성화"
+        overseas_status = "✅ 활성화" if overseas_enabled else "❌ 비활성화"
         
         await update.message.reply_text(
             f"📊 시스템 상태\n\n"
-            f"자동매매: {status_text}\n"
-            f"활성 포지션: {len(positions)}개\n"
-            f"매수 금액: {self.config['trading']['buy_amount']:,}원\n"
-            f"익절 목표: {self.config['trading']['profit_target']*100}%\n"
-            f"트레일링: {self.config['trading']['trailing_stop']*100}%"
+            f"🇰🇷 국내주식: {domestic_status}\n"
+            f"   포지션: {len(domestic_positions)}개\n"
+            f"   매수금액: {self.config['trading']['domestic']['buy_amount']:,}원\n\n"
+            f"🌎 해외주식: {overseas_status}\n"
+            f"   포지션: {len(overseas_positions)}개\n"
+            f"   매수금액: ${self.config['trading']['overseas']['buy_amount']:,.0f}\n\n"
+            f"익절: {self.config['trading']['domestic']['profit_target']*100}%\n"
+            f"손절: {self.config['trading']['domestic']['stop_loss']*100}%"
         )
     
     async def cmd_positions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -978,12 +986,336 @@ class TelegramBot:
         """도움말"""
         await update.message.reply_text(
             "📖 도움말\n\n"
-            "1. 트레이딩뷰에서 알림 설정\n"
-            "2. 알림 메시지를 이 봇으로 전송\n"
-            "3. 자동 매수 실행\n"
-            "4. 3% 익절 + 트레일링 스톱\n\n"
-            "알림 형식:\n"
-            "BUY 005930 삼성전자"
+            "🇰🇷 국내주식: KOSPI, KOSDAQ\n"
+            "🌎 해외주식: NASDAQ, NYSE, AMEX 등\n\n"
+            "트레이딩뷰 Webhook 메시지:\n"
+            "국내: {\"action\":\"BUY\",\"market\":\"domestic\",\"ticker\":\"005930\"}\n"
+            "해외: {\"action\":\"BUY\",\"market\":\"overseas\",\"ticker\":\"AAPL\",\"exchange\":\"NASDAQ\"}\n\n"
+            "명령어:\n"
+            "/start - 메인 메뉴\n"
+            "/status - 시스템 상태"
+        )
+    
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """콜백 쿼리 처리 (버튼 클릭)"""
+        query = update.callback_query
+        await query.answer()
+        
+        data = query.data
+        
+        # 메인 메뉴
+        if data == "status":
+            await self.callback_status(query)
+        elif data == "domestic_menu":
+            await self.callback_domestic_menu(query)
+        elif data == "overseas_menu":
+            await self.callback_overseas_menu(query)
+        elif data == "balance_all":
+            await self.callback_balance_all(query)
+        elif data == "help":
+            await self.callback_help(query)
+        
+        # 국내주식 메뉴
+        elif data == "domestic_on":
+            await self.callback_domestic_on(query)
+        elif data == "domestic_off":
+            await self.callback_domestic_off(query)
+        elif data == "domestic_positions":
+            await self.callback_domestic_positions(query)
+        elif data == "domestic_balance":
+            await self.callback_domestic_balance(query)
+        
+        # 해외주식 메뉴
+        elif data == "overseas_on":
+            await self.callback_overseas_on(query)
+        elif data == "overseas_off":
+            await self.callback_overseas_off(query)
+        elif data == "overseas_positions":
+            await self.callback_overseas_positions(query)
+        elif data == "overseas_balance":
+            await self.callback_overseas_balance(query)
+        
+        # 뒤로 가기
+        elif data == "back_main":
+            await self.callback_back_main(query)
+    
+    # ========== 메인 메뉴 콜백 ==========
+    
+    async def callback_status(self, query):
+        """시스템 상태"""
+        domestic_enabled = self.config["trading"]["domestic"]["enabled"]
+        overseas_enabled = self.config["trading"]["overseas"]["enabled"]
+        
+        domestic_positions = self.system.position_mgr.get_active_positions("domestic")
+        overseas_positions = self.system.position_mgr.get_active_positions("overseas")
+        
+        domestic_status = "✅ 활성화" if domestic_enabled else "❌ 비활성화"
+        overseas_status = "✅ 활성화" if overseas_enabled else "❌ 비활성화"
+        
+        text = (
+            f"📊 시스템 상태\n\n"
+            f"🇰🇷 국내주식: {domestic_status}\n"
+            f"   포지션: {len(domestic_positions)}개\n"
+            f"   매수금액: {self.config['trading']['domestic']['buy_amount']:,}원\n\n"
+            f"🌎 해외주식: {overseas_status}\n"
+            f"   포지션: {len(overseas_positions)}개\n"
+            f"   매수금액: ${self.config['trading']['overseas']['buy_amount']:,.0f}\n\n"
+            f"익절: {self.config['trading']['domestic']['profit_target']*100}%\n"
+            f"손절: {self.config['trading']['domestic']['stop_loss']*100}%"
+        )
+        
+        keyboard = [[InlineKeyboardButton("◀️ 메인 메뉴", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    async def callback_domestic_menu(self, query):
+        """국내주식 메뉴"""
+        enabled = self.config["trading"]["domestic"]["enabled"]
+        status = "✅ 활성화" if enabled else "❌ 비활성화"
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ 자동매매 시작", callback_data="domestic_on"),
+                InlineKeyboardButton("⏸️ 자동매매 중지", callback_data="domestic_off")
+            ],
+            [InlineKeyboardButton("📊 보유 종목", callback_data="domestic_positions")],
+            [InlineKeyboardButton("💰 잔고 조회", callback_data="domestic_balance")],
+            [InlineKeyboardButton("◀️ 메인 메뉴", callback_data="back_main")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"🇰🇷 국내주식 메뉴\n\n"
+            f"현재 상태: {status}\n"
+            f"매수 금액: {self.config['trading']['domestic']['buy_amount']:,}원",
+            reply_markup=reply_markup
+        )
+    
+    async def callback_overseas_menu(self, query):
+        """해외주식 메뉴"""
+        enabled = self.config["trading"]["overseas"]["enabled"]
+        status = "✅ 활성화" if enabled else "❌ 비활성화"
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ 자동매매 시작", callback_data="overseas_on"),
+                InlineKeyboardButton("⏸️ 자동매매 중지", callback_data="overseas_off")
+            ],
+            [InlineKeyboardButton("📊 보유 종목 (USD)", callback_data="overseas_positions")],
+            [InlineKeyboardButton("💰 잔고 조회 (USD)", callback_data="overseas_balance")],
+            [InlineKeyboardButton("◀️ 메인 메뉴", callback_data="back_main")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"🌎 해외주식 메뉴\n\n"
+            f"현재 상태: {status}\n"
+            f"매수 금액: ${self.config['trading']['overseas']['buy_amount']:,.0f}",
+            reply_markup=reply_markup
+        )
+    
+    async def callback_balance_all(self, query):
+        """전체 잔고 조회"""
+        # 국내주식 잔고
+        domestic_result = self.system.order.get_balance()
+        
+        # 해외주식 잔고
+        overseas_result = self.system.overseas_order.get_balance()
+        
+        text = "💰 전체 잔고\n\n"
+        
+        if domestic_result["success"]:
+            text += (
+                f"🇰🇷 국내주식\n"
+                f"   예수금: {domestic_result['cash']:,}원\n"
+                f"   평가액: {domestic_result['total_value']:,}원\n\n"
+            )
+        else:
+            text += "🇰🇷 국내주식: 조회 실패\n\n"
+        
+        if overseas_result["success"]:
+            text += (
+                f"🌎 해외주식\n"
+                f"   예수금: ${overseas_result['cash']:,.2f}\n"
+                f"   평가액: ${overseas_result['total_value']:,.2f}"
+            )
+        else:
+            text += "🌎 해외주식: 조회 실패"
+        
+        keyboard = [[InlineKeyboardButton("◀️ 메인 메뉴", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    async def callback_help(self, query):
+        """도움말"""
+        text = (
+            "📖 도움말\n\n"
+            "🇰🇷 국내주식: KOSPI, KOSDAQ\n"
+            "🌎 해외주식: NASDAQ, NYSE, AMEX 등\n\n"
+            "트레이딩뷰 Webhook:\n"
+            "국내: {\"action\":\"BUY\",\"market\":\"domestic\",\"ticker\":\"005930\"}\n"
+            "해외: {\"action\":\"BUY\",\"market\":\"overseas\",\"ticker\":\"AAPL\",\"exchange\":\"NASDAQ\"}"
+        )
+        
+        keyboard = [[InlineKeyboardButton("◀️ 메인 메뉴", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    # ========== 국내주식 콜백 ==========
+    
+    async def callback_domestic_on(self, query):
+        """국내주식 자동매매 시작"""
+        self.config["trading"]["domestic"]["enabled"] = True
+        self.system.save_config()
+        
+        await query.answer("✅ 국내주식 자동매매 시작")
+        await self.callback_domestic_menu(query)
+    
+    async def callback_domestic_off(self, query):
+        """국내주식 자동매매 중지"""
+        self.config["trading"]["domestic"]["enabled"] = False
+        self.system.save_config()
+        
+        await query.answer("⏸️ 국내주식 자동매매 중지")
+        await self.callback_domestic_menu(query)
+    
+    async def callback_domestic_positions(self, query):
+        """국내주식 포지션 조회"""
+        positions = self.system.position_mgr.get_active_positions("domestic")
+        
+        if not positions:
+            text = "📊 국내주식\n\n활성 포지션이 없습니다"
+        else:
+            text = f"📊 국내주식 보유 종목 ({len(positions)}개)\n\n"
+            
+            for pos in positions:
+                current_price = self.system.market.get_current_price(pos["code"])
+                if current_price:
+                    profit_rate = (current_price - pos["buy_price"]) / pos["buy_price"]
+                    
+                    text += f"[{pos['code']}] {pos['name']}\n"
+                    text += f"  매수가: {pos['buy_price']:,.0f}원\n"
+                    text += f"  현재가: {current_price:,.0f}원\n"
+                    text += f"  수익률: {profit_rate*100:+.2f}%\n"
+                    text += f"  수량: {pos['quantity']:,}주\n"
+                    text += f"  상태: {pos['status']}\n\n"
+        
+        keyboard = [[InlineKeyboardButton("◀️ 국내주식 메뉴", callback_data="domestic_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    async def callback_domestic_balance(self, query):
+        """국내주식 잔고 조회"""
+        result = self.system.order.get_balance()
+        
+        if result["success"]:
+            text = (
+                f"💰 국내주식 잔고\n\n"
+                f"예수금: {result['cash']:,}원\n"
+                f"총 평가액: {result['total_value']:,}원\n"
+                f"보유 종목: {len(result.get('stocks', []))}개"
+            )
+        else:
+            text = "❌ 국내주식 잔고 조회 실패"
+        
+        keyboard = [[InlineKeyboardButton("◀️ 국내주식 메뉴", callback_data="domestic_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    # ========== 해외주식 콜백 ==========
+    
+    async def callback_overseas_on(self, query):
+        """해외주식 자동매매 시작"""
+        self.config["trading"]["overseas"]["enabled"] = True
+        self.system.save_config()
+        
+        await query.answer("✅ 해외주식 자동매매 시작")
+        await self.callback_overseas_menu(query)
+    
+    async def callback_overseas_off(self, query):
+        """해외주식 자동매매 중지"""
+        self.config["trading"]["overseas"]["enabled"] = False
+        self.system.save_config()
+        
+        await query.answer("⏸️ 해외주식 자동매매 중지")
+        await self.callback_overseas_menu(query)
+    
+    async def callback_overseas_positions(self, query):
+        """해외주식 포지션 조회"""
+        positions = self.system.position_mgr.get_active_positions("overseas")
+        
+        if not positions:
+            text = "📊 해외주식 (USD)\n\n활성 포지션이 없습니다"
+        else:
+            text = f"📊 해외주식 보유 종목 ({len(positions)}개)\n\n"
+            
+            for pos in positions:
+                # 거래소 정보 가져오기 (기본: NASDAQ)
+                exchange = pos.get("exchange", "NASDAQ")
+                current_price = self.system.overseas_market.get_current_price(pos["code"], exchange)
+                
+                if current_price:
+                    profit_rate = (current_price - pos["buy_price"]) / pos["buy_price"]
+                    
+                    text += f"[{pos['code']}] {pos['name']}\n"
+                    text += f"  매수가: ${pos['buy_price']:.2f}\n"
+                    text += f"  현재가: ${current_price:.2f}\n"
+                    text += f"  수익률: {profit_rate*100:+.2f}%\n"
+                    text += f"  수량: {pos['quantity']:,}주\n"
+                    text += f"  상태: {pos['status']}\n\n"
+        
+        keyboard = [[InlineKeyboardButton("◀️ 해외주식 메뉴", callback_data="overseas_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    async def callback_overseas_balance(self, query):
+        """해외주식 잔고 조회"""
+        result = self.system.overseas_order.get_balance()
+        
+        if result["success"]:
+            text = (
+                f"💰 해외주식 잔고 (USD)\n\n"
+                f"예수금: ${result['cash']:,.2f}\n"
+                f"총 평가액: ${result['total_value']:,.2f}\n"
+                f"보유 종목: {len(result.get('stocks', []))}개"
+            )
+        else:
+            text = "❌ 해외주식 잔고 조회 실패"
+        
+        keyboard = [[InlineKeyboardButton("◀️ 해외주식 메뉴", callback_data="overseas_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    # ========== 공통 콜백 ==========
+    
+    async def callback_back_main(self, query):
+        """메인 메뉴로 돌아가기"""
+        keyboard = [
+            [InlineKeyboardButton("📊 시스템 상태", callback_data="status")],
+            [
+                InlineKeyboardButton("🇰🇷 국내주식", callback_data="domestic_menu"),
+                InlineKeyboardButton("🌎 해외주식", callback_data="overseas_menu")
+            ],
+            [InlineKeyboardButton("💰 전체 잔고", callback_data="balance_all")],
+            [InlineKeyboardButton("❓ 도움말", callback_data="help")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🤖 트레이딩뷰 자동매매 봇\n\n"
+            "국내주식 + 해외주식 자동매매\n\n"
+            "📱 아래 버튼을 선택하세요:",
+            reply_markup=reply_markup
         )
     
     async def handle_alert(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1123,7 +1455,8 @@ class TradingSystem:
                 buy_price=result["price"],
                 quantity=result["quantity"],
                 strategy=strategy,
-                market_type=market_type
+                market_type=market_type,
+                exchange=exchange
             )
             
             return {
@@ -1132,14 +1465,11 @@ class TradingSystem:
                 "name": name,
                 "price": result["price"],
                 "quantity": result["quantity"],
-                "market_type": market_type
+                "market_type": market_type,
+                "exchange": exchange
             }
         
         return result
-        
-        # 중복 진입 방지
-        if self.position_mgr.has_position(code):
-            return {"success": False, "error": "이미 보유 중"}
         
         # 매수 주문
         buy_amount = self.config["trading"]["buy_amount"]
