@@ -4,9 +4,7 @@
     "chat_id": "여기에_채팅ID_입력"
   },
   "kis": {
-    "server": "vps",
-    "account": "12345678",
-    "product": "01"
+    "server": "vps"
   },
   "trading": {
     "enabled": false,

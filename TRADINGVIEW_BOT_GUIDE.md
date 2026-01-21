@@ -82,9 +82,7 @@ python3 tradingview_bot.py
     "chat_id": "987654321"
   },
   "kis": {
-    "server": "vps",      // prod: 실전, vps: 모의
-    "account": "12345678",
-    "product": "01"
+    "server": "vps"       // prod: 실전투자, vps: 모의투자
   },
   "trading": {
     "enabled": false,     // true: 자동매매 시작
@@ -96,6 +94,10 @@ python3 tradingview_bot.py
   }
 }
 ```
+
+**참고**: 계좌번호(`account`)와 상품코드(`product`)는 `kis_devlp.yaml` 파일에서 자동으로 가져옵니다.
+- 모의투자(`vps`): `my_paper_stock` + `my_prod` 사용
+- 실전투자(`prod`): `my_acct_stock` + `my_prod` 사용
 
 ---
 

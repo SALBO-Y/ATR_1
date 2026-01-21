@@ -295,9 +295,7 @@ tradingview_bot.py          # 메인 파일 (단일 파일)
     "chat_id": "YOUR_CHAT_ID"
   },
   "kis": {
-    "server": "vps",
-    "account": "12345678",
-    "product": "01"
+    "server": "vps"      // prod: 실전투자, vps: 모의투자
   },
   "trading": {
     "enabled": false,
@@ -306,14 +304,15 @@ tradingview_bot.py          # 메인 파일 (단일 파일)
     "trailing_stop": 0.02,
     "stop_loss": 0.025,
     "check_interval": 5
-  },
-  "webhook": {
-    "enabled": true,
-    "port": 5000,
-    "secret": "your-secret-key"
   }
 }
 ```
+
+**참고**: 
+- 계좌번호와 상품코드는 `kis_devlp.yaml`에서 자동으로 가져옵니다
+- `server` 값에 따라 자동으로 계좌 선택:
+  - `vps`: `my_paper_stock` + `my_prod` 사용
+  - `prod`: `my_acct_stock` + `my_prod` 사용
 
 ---
 

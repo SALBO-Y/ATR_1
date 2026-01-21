@@ -57,9 +57,7 @@ DEFAULT_CONFIG = {
         "chat_id": ""
     },
     "kis": {
-        "server": "vps",  # prod 또는 vps
-        "account": "",
-        "product": "01"
+        "server": "vps"  # prod: 실전투자, vps: 모의투자
     },
     "trading": {
         "enabled": False,
@@ -234,8 +232,13 @@ class KISOrder:
         self.yaml_cfg = yaml_cfg
         self.config = config
         
-        self.account = config["kis"]["account"]
-        self.product = config["kis"]["product"]
+        # kis_devlp.yaml에서 계좌 정보 가져오기
+        if auth.server == "prod":
+            self.account = yaml_cfg["my_acct_stock"]
+        else:
+            self.account = yaml_cfg["my_paper_stock"]
+        
+        self.product = yaml_cfg["my_prod"]
     
     def buy(self, code: str, amount: int) -> Dict:
         """매수 주문 (금액 기준)"""
