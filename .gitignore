@@ -165,3 +165,12 @@ cython_debug/
 *.lock
 
 *_logs/
+
+# 민감한 설정 파일 (API 키, 토큰 등)
+config.json
+kis_devlp.yaml
+positions.json
+logs/
+
+# KIS API 설정
+~/KIS/config/
